@@ -1,15 +1,30 @@
 {
   "$schema": "node_modules/albatros/schema.json",
   "name": "nashepo.projectfiles",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "НашеПО · Создание проекта",
   "description": "Открытие нескольких файлов в одном проекте Топоматик 360",
-  "author": {"name": "НашеПО", "url": "https://nashepo.ru/"},
-  "bugs": {"url": "https://t.me/RoburFan"},
-  "repository": {"type": "git", "url": "https://github.com/BorisMoniac/360.ProjectFiles.git"},
+  "author": {
+    "name": "НашеПО",
+    "url": "https://nashepo.ru/"
+  },
+  "bugs": {
+    "url": "https://t.me/RoburFan"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BorisMoniac/360.ProjectFiles.git"
+  },
   "homepage": "https://borismoniac.github.io/360.ProjectFiles/",
   "license": "MIT",
-  "keywords": ["проект", "вложения", "IFC", "SMDX", "DWG", "Топоматик 360"],
+  "keywords": [
+    "проект",
+    "вложения",
+    "IFC",
+    "SMDX",
+    "DWG",
+    "Топоматик 360"
+  ],
   "main": "src/index.ts",
   "sdk": "^1.4.0",
   "scripts": {
@@ -19,7 +34,10 @@
     "serve": "albatros-cli serve",
     "typecheck": "tsc --noEmit"
   },
-  "devDependencies": {"albatros": "1.4.2", "typescript": "~5.9.3"},
+  "devDependencies": {
+    "albatros": "1.4.2",
+    "typescript": "~5.9.3"
+  },
   "albatros": {
     "actions": {
       "project_create": {
@@ -51,11 +69,21 @@
       {
         "label": "НашеПО",
         "submenu": [
-          {"action": "project_create"},
-          {"action": "project_add"},
-          {"type": "separator"},
-          {"action": "project_reload"},
-          {"action": "project_list"}
+          {
+            "action": "project_create"
+          },
+          {
+            "action": "project_add"
+          },
+          {
+            "tag": "s"
+          },
+          {
+            "action": "project_reload"
+          },
+          {
+            "action": "project_list"
+          }
         ]
       }
     ],
@@ -68,11 +96,28 @@
             "tag": "nashepo_project",
             "label": "Проект",
             "items": [
-              {"tag": "bt", "action": "project_create"},
-              {"tag": "bt", "action": "project_add"},
-              {"tag": "s"},
-              {"tag": "b", "action": "project_reload"},
-              {"tag": "b", "action": "project_list"}
+              {
+                "tag": "bt",
+                "action": "project_create"
+              },
+              {
+                "tag": "bt",
+                "action": "project_add"
+              }
+            ]
+          },
+          {
+            "tag": "nashepo_attachments",
+            "label": "Вложения",
+            "items": [
+              {
+                "tag": "bt",
+                "action": "project_reload"
+              },
+              {
+                "tag": "bt",
+                "action": "project_list"
+              }
             ]
           }
         ]
