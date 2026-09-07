@@ -6,6 +6,7 @@
  */
 import { AttachmentState } from 'albatros/enums';
 import { distinct, fileName, pickFiles } from './files';
+import type { AttachResult } from './project';
 import { activeProject, attachAll, projectOf, projectTitle, summarize, waitForProject } from './project';
 
 const CHANNEL = 'Создание проекта';
@@ -86,10 +87,7 @@ export function create_project(ctx: Context): Promise<void> {
       return;
     }
 
-    const results = await attachAll(ctx, project, rest, output);
-    const report = summarize(results);
-    output.appendLine(report);
-    await ctx.showMessage(report, results.some(r => r.status === 'failed') ? 'warning' : 'info');
+    await report(ctx, output, await attachAll(ctx, project, rest, output));
   });
 }
 
@@ -107,11 +105,17 @@ export function add_files(ctx: Context): Promise<void> {
     if (!files.length) return;
 
     output.appendLine(`Добавление файлов в проект: ${files.length}`);
-    const results = await attachAll(ctx, project, files, output);
-    const report = summarize(results);
-    output.appendLine(report);
-    await ctx.showMessage(report, results.some(r => r.status === 'failed') ? 'warning' : 'info');
+    await report(ctx, output, await attachAll(ctx, project, files, output));
   });
+}
+
+/** Показать итог подключения файлов. Журнал открывается, если не всё прошло гладко. */
+async function report(ctx: Context, output: OutputChannel, results: AttachResult[]): Promise<void> {
+  const text = summarize(results);
+  output.appendLine(text);
+  const trouble = results.some(r => r.status === 'failed' || r.status === 'loading');
+  if (trouble) output.show();
+  await ctx.showMessage(text, trouble ? 'warning' : 'info');
 }
 
 /** Перечитать все вложения текущего проекта. */

@@ -4,10 +4,13 @@
 import { AttachmentState } from 'albatros/enums';
 import { baseName, fileName, permanentUri } from './files';
 
+/** Сколько ждать загрузки одного вложения, прежде чем считать её незавершённой. */
+const LOAD_TIMEOUT_MS = 180000;
+
 /** Результат подключения одного файла. */
 export interface AttachResult {
   name: string;
-  status: 'added' | 'exists' | 'failed';
+  status: 'added' | 'exists' | 'loading' | 'failed';
   message?: string;
 }
 
@@ -54,51 +57,24 @@ async function ensureLayer(project: Drawing, name: string): Promise<DwgLayer | u
   }
 }
 
-/** Уже подключённое вложение с таким же адресом. */
+/** Уже подключённое вложение с таким же адресом или именем. */
 function findAttachment(project: Drawing, uri: string, name: string): DwgAttachment | undefined {
   return project.attachments.find(att => att.uri === uri || (!!att.name && att.name === name));
 }
 
-/**
- * Подключить файл к проекту как вложение и загрузить его.
- * Ошибка одного файла не прерывает обработку остальных.
- */
-export async function attachFile(project: Drawing, ws: Workspace, output: OutputChannel): Promise<AttachResult> {
-  const name = baseName(ws);
-  const label = fileName(ws);
-  try {
-    const uri = await permanentUri(ws);
-    if (!uri) {
-      output.appendLine(`✗ ${label}: не удалось определить адрес файла`);
-      return {name: label, status: 'failed', message: 'нет адреса файла'};
-    }
-
-    const duplicate = findAttachment(project, uri, name);
-    if (duplicate) {
-      output.appendLine(`= ${label}: уже подключён к проекту`);
-      if (duplicate.state !== AttachmentState.Loaded) await duplicate.show();
-      return {name: label, status: 'exists'};
-    }
-
-    const layer = await ensureLayer(project, name);
-    const attachment = await project.attachments.add({name, uri, layer});
-    await attachment.show();
-
-    if (attachment.state === AttachmentState.Error) {
-      output.appendLine(`✗ ${label}: загрузка завершилась ошибкой`);
-      return {name: label, status: 'failed', message: 'ошибка загрузки'};
-    }
-
-    output.appendLine(`+ ${label}: подключён`);
-    return {name: label, status: 'added'};
-  } catch (e) {
-    const message = (e as Error)?.message ?? String(e);
-    output.appendLine(`✗ ${label}: ${message}`);
-    return {name: label, status: 'failed', message};
-  }
+/** Подготовленное к загрузке вложение. */
+interface Pending {
+  attachment: DwgAttachment;
+  label: string;
 }
 
-/** Подключить набор файлов, показывая прогресс. */
+/**
+ * Подключить набор файлов.
+ *
+ * Сначала все вложения добавляются в проект, и только потом запускается их
+ * загрузка, причём параллельно. Последовательное ожидание каждой загрузки
+ * приводило к тому, что вложения зависали в состоянии «загрузка».
+ */
 export async function attachAll(
   ctx: Context,
   project: Drawing,
@@ -106,29 +82,129 @@ export async function attachAll(
   output: OutputChannel
 ): Promise<AttachResult[]> {
   const results: AttachResult[] = [];
+  const pending: Pending[] = [];
+
   const progress = ctx.beginProgress();
   progress.indeterminate = false;
-  progress.label = 'Подключение файлов к проекту';
+  progress.label = 'Добавление файлов в проект';
   try {
     for (let i = 0; i < items.length; i++) {
-      progress.details = fileName(items[i]);
-      progress.percents = Math.round((i / items.length) * 100);
-      results.push(await attachFile(project, items[i], output));
+      const ws = items[i];
+      const label = fileName(ws);
+      const name = baseName(ws);
+      progress.details = label;
+      progress.percents = Math.round((i / items.length) * 50);
+      try {
+        const uri = await permanentUri(ws);
+        if (!uri) {
+          output.appendLine(`- ${label}: не удалось определить адрес файла`);
+          results.push({name: label, status: 'failed', message: 'нет адреса файла'});
+          continue;
+        }
+        output.appendLine(`  ${label} -> ${uri}`);
+
+        const duplicate = findAttachment(project, uri, name);
+        if (duplicate) {
+          output.appendLine(`= ${label}: уже подключён к проекту`);
+          results.push({name: label, status: 'exists'});
+          if (duplicate.state !== AttachmentState.Loaded) pending.push({attachment: duplicate, label});
+          continue;
+        }
+
+        const layer = await ensureLayer(project, name);
+        const attachment = await project.attachments.add({name, uri, layer});
+        pending.push({attachment, label});
+      } catch (e) {
+        const message = (e as Error)?.message ?? String(e);
+        output.appendLine(`- ${label}: ${message}`);
+        results.push({name: label, status: 'failed', message});
+      }
+    }
+
+    progress.label = 'Загрузка вложений';
+    progress.details = `${pending.length} шт.`;
+    progress.percents = 50;
+
+    const loaded = await Promise.all(pending.map(item => load(item, output)));
+    for (const item of loaded) {
+      const existing = results.find(r => r.name === item.name && r.status === 'exists');
+      if (existing) {
+        if (item.status !== 'added') existing.status = item.status;
+        continue;
+      }
+      results.push(item);
     }
     progress.percents = 100;
   } finally {
     ctx.endProgress(progress);
   }
+
   return results;
+}
+
+/** Загрузить одно вложение, не позволяя ожиданию длиться бесконечно. */
+async function load(item: Pending, output: OutputChannel): Promise<AttachResult> {
+  const {attachment, label} = item;
+  try {
+    await withTimeout(attachment.show(), LOAD_TIMEOUT_MS);
+  } catch (e) {
+    const message = (e as Error)?.message ?? String(e);
+    if (attachment.state === AttachmentState.Loaded) {
+      output.appendLine(`+ ${label}: подключён`);
+      return {name: label, status: 'added'};
+    }
+    output.appendLine(`- ${label}: ${message}`);
+    return {name: label, status: message === 'timeout' ? 'loading' : 'failed', message};
+  }
+
+  if (attachment.state === AttachmentState.Error) {
+    output.appendLine(`- ${label}: загрузка завершилась ошибкой`);
+    return {name: label, status: 'failed', message: 'ошибка загрузки'};
+  }
+  if (attachment.state === AttachmentState.Loading) {
+    output.appendLine(`~ ${label}: загрузка продолжается`);
+    return {name: label, status: 'loading'};
+  }
+
+  output.appendLine(`+ ${label}: подключён`);
+  return {name: label, status: 'added'};
+}
+
+/** Ограничить ожидание обещания. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise<T | undefined>((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error('timeout'));
+    }, ms);
+    promise.then(
+      value => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 /** Короткая сводка по результатам. */
 export function summarize(results: AttachResult[]): string {
   const added = results.filter(r => r.status === 'added').length;
   const exists = results.filter(r => r.status === 'exists').length;
+  const loading = results.filter(r => r.status === 'loading').length;
   const failed = results.filter(r => r.status === 'failed');
   const parts: string[] = [`Подключено файлов: ${added}`];
   if (exists) parts.push(`уже было в проекте: ${exists}`);
+  if (loading) parts.push(`ещё загружается: ${loading}`);
   if (failed.length) parts.push(`не удалось: ${failed.length} (${failed.map(r => r.name).join(', ')})`);
   return parts.join('. ') + '.';
 }

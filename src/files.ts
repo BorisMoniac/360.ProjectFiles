@@ -36,17 +36,21 @@ export function baseName(ws: Workspace): string {
 }
 
 /**
- * Постоянный адрес рабочей области для записи во вложение.
- * Закладка переживает перезапуск программы, поэтому она в приоритете над origin.
+ * Адрес рабочей области для записи во вложение.
+ *
+ * Сначала берётся origin: это обычный адрес вида file:///..., именно такой
+ * ожидает загрузчик вложений. Закладка используется только там, где origin
+ * отсутствует, например когда файл выбран в браузере.
  */
 export async function permanentUri(ws: Workspace): Promise<string | undefined> {
+  if (ws.origin) return ws.origin;
   try {
     const bookmark = await ws.bookmark?.();
     if (bookmark) return bookmark;
   } catch {
-    // Хранилище не умеет делать закладки, остаётся исходный адрес.
+    // Хранилище не умеет делать закладки, адреса нет.
   }
-  return ws.origin;
+  return undefined;
 }
 
 /** Привести результат диалога к массиву рабочих областей. */
