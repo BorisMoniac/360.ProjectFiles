@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/albatros/schema.json",
   "name": "nashepo.projectfiles",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "displayName": "НашеПО · Создание проекта",
   "description": "Открытие нескольких файлов в одном проекте Топоматик 360",
   "author": {

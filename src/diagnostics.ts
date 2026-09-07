@@ -3,7 +3,7 @@
  * в каком виде платформа хранит адреса файлов и какие команды у неё есть.
  */
 import { AttachmentState } from 'albatros/enums';
-import { FILE_FILTERS } from './files';
+import { importerFilters } from './files';
 import { activeProject } from './project';
 
 const LINE = '-'.repeat(56);
@@ -96,7 +96,7 @@ async function probeFile(ctx: Context, output: OutputChannel): Promise<void> {
   output.appendLine('   Сейчас откроется выбор файла. Выберите любой файл модели.');
   let ws: Workspace | undefined;
   try {
-    ws = await ctx.openDialog({buttonLabel: 'Проверить', filters: FILE_FILTERS});
+    ws = await ctx.openDialog({buttonLabel: 'Проверить', filters: importerFilters(ctx)});
   } catch (e) {
     output.appendLine(`   диалог не открылся: ${(e as Error)?.message ?? String(e)}`);
     return;

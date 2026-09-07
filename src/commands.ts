@@ -8,7 +8,7 @@ import { AttachmentState } from 'albatros/enums';
 import { collect } from './diagnostics';
 import { distinct, fileName, pickFiles } from './files';
 import type { AttachResult } from './project';
-import { activeProject, attachAll, projectOf, projectTitle, summarize, waitForProject } from './project';
+import { activateView, activeProject, attachAll, projectOf, projectTitle, summarize, waitForProject } from './project';
 
 const CHANNEL = 'Создание проекта';
 
@@ -70,6 +70,9 @@ export function create_project(ctx: Context): Promise<void> {
       output.appendLine(`Открываю проект: ${fileName(first)}`);
       const app = await ctx.manager.openWorkspace(first);
       project = await waitForProject(app);
+      if (!(await activateView(ctx, app))) {
+        output.appendLine('Вид проекта не готов, подключение файлов может не сработать.');
+      }
       if (!project) {
         output.appendLine('Не удалось получить модель проекта. Формат первого файла не поддерживается как проект.');
         output.show();
@@ -114,7 +117,7 @@ export function add_files(ctx: Context): Promise<void> {
 async function report(ctx: Context, output: OutputChannel, results: AttachResult[]): Promise<void> {
   const text = summarize(results);
   output.appendLine(text);
-  const trouble = results.some(r => r.status === 'failed' || r.status === 'loading');
+  const trouble = results.some(r => r.status === 'failed');
   if (trouble) output.show();
   await ctx.showMessage(text, trouble ? 'warning' : 'info');
 }

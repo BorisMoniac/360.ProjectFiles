@@ -2,22 +2,35 @@
  * Выбор файлов и разбор их имён.
  */
 
-/** Фильтры диалога открытия. Первый фильтр применяется по умолчанию. */
-export const FILE_FILTERS: FileFilter[] = [
-  {
-    name: 'Модели и чертежи',
-    extensions: ['smdx', 'ifc', 'ifcxml', 'ifczip', 'dwg', 'dxf', 'xml', 'land', 'gltf', 'glb', 'obj', 'las', 'laz', 'txt', 'csv']
-  },
-  {name: 'Топоматик 360 (*.smdx)', extensions: ['smdx']},
-  {name: 'IFC (*.ifc, *.ifcxml, *.ifczip)', extensions: ['ifc', 'ifcxml', 'ifczip']},
-  {name: 'Чертежи AutoCAD (*.dwg, *.dxf)', extensions: ['dwg', 'dxf']}
+/** Запасной набор фильтров, если импортёры почему-то не найдены. */
+const FALLBACK_FILTERS: FileFilter[] = [
+  {name: 'Модели и чертежи', extensions: ['smdx', 'ifc', 'dwg', 'dxf', 'xml']}
 ];
 
 /**
- * В веб-версии окно выбора файлов строится браузером, и он отклоняет фильтр
- * с маской «*». Поэтому в списке нет пункта «Все файлы»: браузер добавляет
- * такой пункт сам, а в настольной версии выручает попытка без фильтров.
+ * Фильтры диалога, собранные из зарегистрированных импортёров проекта.
+ *
+ * Так же строит свой список сама платформа в команде «Добавить файл»,
+ * поэтому набор форматов совпадает с тем, что доступно в дереве проекта,
+ * включая форматы, которые добавили сторонние плагины.
  */
+export function importerFilters(ctx: Context): FileFilter[] {
+  const filters: FileFilter[] = [];
+  for (const extension of ctx.manager.extensions) {
+    const importers = extension.manifest?.albatros?.importers ?? [];
+    for (const importer of importers) {
+      if (importer.target !== 'wdx') continue;
+      const pattern = importer.filenamePattern.endsWith('/')
+        ? importer.filenamePattern.slice(0, -1)
+        : importer.filenamePattern;
+      const value = pattern.startsWith('.') ? pattern.substring(1) : pattern;
+      if (value) filters.push({name: importer.description, extensions: [value]});
+    }
+  }
+  if (!filters.length) return FALLBACK_FILTERS;
+  filters.unshift({name: 'Все поддерживаемые форматы', extensions: filters.map(f => f.extensions[0])});
+  return filters;
+}
 
 /** Заголовок рабочей области, то есть имя файла с расширением. */
 export function fileName(ws: Workspace): string {
@@ -26,42 +39,6 @@ export function fileName(ws: Workspace): string {
   const origin = ws.origin ?? '';
   const tail = origin.split(/[\/\\]/).pop() ?? '';
   return decodeURIComponent(tail) || 'Без имени';
-}
-
-/** Имя файла без расширения. Используется как имя вложения и слоя. */
-export function baseName(ws: Workspace): string {
-  const name = fileName(ws);
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(0, dot) : name;
-}
-
-/** Все известные адреса рабочей области. */
-export interface WorkspaceAddress {
-  /** Адрес, выбранный для записи во вложение. */
-  uri?: string;
-  /** Исходный адрес рабочей области. */
-  origin?: string;
-  /** Закладка, если хранилище умеет их делать. */
-  bookmark?: string;
-}
-
-/**
- * Адреса рабочей области.
- *
- * Закладка в приоритете: origin у выбранного в диалоге файла имеет вид
- * file://handle/имя и живёт только до закрытия программы, тогда как закладка
- * задумана как постоянная ссылка на ресурс.
- */
-export async function addressOf(ws: Workspace): Promise<WorkspaceAddress> {
-  const address: WorkspaceAddress = {origin: ws.origin};
-  try {
-    const bookmark = await ws.bookmark?.();
-    if (bookmark) address.bookmark = bookmark;
-  } catch {
-    // Хранилище не умеет делать закладки.
-  }
-  address.uri = address.bookmark ?? address.origin;
-  return address;
 }
 
 /** Привести результат диалога к массиву рабочих областей. */
@@ -80,16 +57,22 @@ interface PickAttempt {
 /**
  * Показать диалог выбора файлов.
  *
- * Способы перебираются по очереди. Следующий способ пробуется, если предыдущий
- * бросил ошибку или завершился мгновенно и без результата, то есть окно не открылось.
- * Если окно открылось и пользователь отменил выбор, возвращается пустой массив
- * и перебор прекращается.
+ * Способы перебираются по очереди. Следующий пробуется, если предыдущий бросил
+ * ошибку или завершился мгновенно и без результата, то есть окно не открылось.
+ * Если окно открылось и пользователь отменил выбор, возвращается пустой массив.
  */
 export async function pickFiles(ctx: Context, message: string, output: OutputChannel): Promise<Workspace[]> {
+  const filters = importerFilters(ctx);
+  output.appendLine(`Форматов в фильтре: ${filters.length}`);
+
   const attempts: PickAttempt[] = [
     {
       name: 'диалог открытия',
-      run: () => ctx.openDialog({multiSelections: true, buttonLabel: 'Выбрать', message, filters: FILE_FILTERS})
+      run: () => ctx.openDialog({multiSelections: true, buttonLabel: 'Выбрать', message, filters})
+    },
+    {
+      name: 'диалог открытия без фильтров',
+      run: () => ctx.openDialog({multiSelections: true})
     },
     {
       name: 'обозреватель хранилищ',
@@ -98,16 +81,8 @@ export async function pickFiles(ctx: Context, message: string, output: OutputCha
         title: message,
         canPickMany: true,
         allowLocal: true,
-        filters: FILE_FILTERS
+        filters
       })
-    },
-    {
-      name: 'диалог открытия без фильтров',
-      run: () => ctx.openDialog({multiSelections: true})
-    },
-    {
-      name: 'диалог открытия по одному файлу',
-      run: () => ctx.openDialog({buttonLabel: 'Выбрать'})
     }
   ];
 
@@ -137,10 +112,7 @@ export async function pickFiles(ctx: Context, message: string, output: OutputCha
 
   output.appendLine('Ни один способ выбора файлов не сработал.');
   output.show();
-  await ctx.showMessage(
-    ['Не удалось открыть окно выбора файлов.', ...problems],
-    'error'
-  );
+  await ctx.showMessage(['Не удалось открыть окно выбора файлов.', ...problems], 'error');
   return [];
 }
 
