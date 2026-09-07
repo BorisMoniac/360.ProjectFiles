@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/albatros/schema.json",
   "name": "nashepo.projectfiles",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "displayName": "НашеПО · Создание проекта",
   "description": "Открытие нескольких файлов в одном проекте Топоматик 360",
   "author": {
@@ -44,25 +44,29 @@
         "label": "Создать проект",
         "description": "Выбрать несколько файлов и открыть их в одном проекте",
         "cmd": "create_project",
-        "icon": "create_new_folder"
+        "icon": "create_new_folder",
+        "flags": "128"
       },
       "project_add": {
         "label": "Добавить файлы",
         "description": "Добавить файлы в текущий проект как вложения",
         "cmd": "add_files",
-        "icon": "library_add"
+        "icon": "library_add",
+        "flags": "128"
       },
       "project_reload": {
         "label": "Обновить вложения",
         "description": "Перечитать все вложения текущего проекта",
         "cmd": "reload_attachments",
-        "icon": "sync"
+        "icon": "sync",
+        "flags": "128"
       },
       "project_list": {
         "label": "Состав проекта",
         "description": "Показать список вложений текущего проекта",
         "cmd": "list_attachments",
-        "icon": "list_alt"
+        "icon": "list_alt",
+        "flags": "128"
       }
     },
     "menu": [
