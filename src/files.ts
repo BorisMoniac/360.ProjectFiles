@@ -35,22 +35,33 @@ export function baseName(ws: Workspace): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+/** Все известные адреса рабочей области. */
+export interface WorkspaceAddress {
+  /** Адрес, выбранный для записи во вложение. */
+  uri?: string;
+  /** Исходный адрес рабочей области. */
+  origin?: string;
+  /** Закладка, если хранилище умеет их делать. */
+  bookmark?: string;
+}
+
 /**
- * Адрес рабочей области для записи во вложение.
+ * Адреса рабочей области.
  *
- * Сначала берётся origin: это обычный адрес вида file:///..., именно такой
- * ожидает загрузчик вложений. Закладка используется только там, где origin
- * отсутствует, например когда файл выбран в браузере.
+ * Закладка в приоритете: origin у выбранного в диалоге файла имеет вид
+ * file://handle/имя и живёт только до закрытия программы, тогда как закладка
+ * задумана как постоянная ссылка на ресурс.
  */
-export async function permanentUri(ws: Workspace): Promise<string | undefined> {
-  if (ws.origin) return ws.origin;
+export async function addressOf(ws: Workspace): Promise<WorkspaceAddress> {
+  const address: WorkspaceAddress = {origin: ws.origin};
   try {
     const bookmark = await ws.bookmark?.();
-    if (bookmark) return bookmark;
+    if (bookmark) address.bookmark = bookmark;
   } catch {
-    // Хранилище не умеет делать закладки, адреса нет.
+    // Хранилище не умеет делать закладки.
   }
-  return undefined;
+  address.uri = address.bookmark ?? address.origin;
+  return address;
 }
 
 /** Привести результат диалога к массиву рабочих областей. */

@@ -2,7 +2,7 @@
  * Работа с проектом: поиск главного чертежа и подключение файлов как вложений.
  */
 import { AttachmentState } from 'albatros/enums';
-import { baseName, fileName, permanentUri } from './files';
+import { addressOf, baseName, fileName } from './files';
 
 /** Сколько ждать загрузки одного вложения, прежде чем считать её незавершённой. */
 const LOAD_TIMEOUT_MS = 180000;
@@ -95,13 +95,17 @@ export async function attachAll(
       progress.details = label;
       progress.percents = Math.round((i / items.length) * 50);
       try {
-        const uri = await permanentUri(ws);
+        const address = await addressOf(ws);
+        output.appendLine(`  ${label}`);
+        output.appendLine(`     origin:   ${address.origin ?? 'нет'}`);
+        output.appendLine(`     bookmark: ${address.bookmark ?? 'нет'}`);
+        const uri = address.uri;
         if (!uri) {
           output.appendLine(`- ${label}: не удалось определить адрес файла`);
           results.push({name: label, status: 'failed', message: 'нет адреса файла'});
           continue;
         }
-        output.appendLine(`  ${label} -> ${uri}`);
+        output.appendLine(`     выбран:   ${uri}`);
 
         const duplicate = findAttachment(project, uri, name);
         if (duplicate) {

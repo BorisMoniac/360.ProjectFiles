@@ -5,6 +5,7 @@
  * пользователю, поэтому нажатие кнопки никогда не остаётся без реакции.
  */
 import { AttachmentState } from 'albatros/enums';
+import { collect } from './diagnostics';
 import { distinct, fileName, pickFiles } from './files';
 import type { AttachResult } from './project';
 import { activeProject, attachAll, projectOf, projectTitle, summarize, waitForProject } from './project';
@@ -199,4 +200,9 @@ function stateLabel(state: AttachmentState): string {
     case AttachmentState.Error: return 'ошибка загрузки';
     default: return 'состояние неизвестно';
   }
+}
+
+/** Собрать отчёт об окружении для разбора проблем. */
+export function diagnose(ctx: Context): Promise<void> {
+  return guard(ctx, 'Диагностика', output => collect(ctx, output));
 }

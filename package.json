@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/albatros/schema.json",
   "name": "nashepo.projectfiles",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "displayName": "НашеПО · Создание проекта",
   "description": "Открытие нескольких файлов в одном проекте Топоматик 360",
   "author": {
@@ -67,6 +67,13 @@
         "cmd": "list_attachments",
         "icon": "list_alt",
         "flags": "128"
+      },
+      "project_diag": {
+        "label": "Диагностика",
+        "description": "Собрать отчёт об окружении для разбора проблем",
+        "cmd": "diagnose",
+        "icon": "bug_report",
+        "flags": "128"
       }
     },
     "menu": [
@@ -87,6 +94,12 @@
           },
           {
             "action": "project_list"
+          },
+          {
+            "tag": "s"
+          },
+          {
+            "action": "project_diag"
           }
         ]
       }
@@ -121,6 +134,16 @@
               {
                 "tag": "bt",
                 "action": "project_list"
+              }
+            ]
+          },
+          {
+            "tag": "nashepo_service",
+            "label": "Служебное",
+            "items": [
+              {
+                "tag": "bt",
+                "action": "project_diag"
               }
             ]
           }
