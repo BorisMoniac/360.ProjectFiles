@@ -10,9 +10,14 @@ export const FILE_FILTERS: FileFilter[] = [
   },
   {name: 'Топоматик 360 (*.smdx)', extensions: ['smdx']},
   {name: 'IFC (*.ifc, *.ifcxml, *.ifczip)', extensions: ['ifc', 'ifcxml', 'ifczip']},
-  {name: 'Чертежи AutoCAD (*.dwg, *.dxf)', extensions: ['dwg', 'dxf']},
-  {name: 'Все файлы', extensions: ['*']}
+  {name: 'Чертежи AutoCAD (*.dwg, *.dxf)', extensions: ['dwg', 'dxf']}
 ];
+
+/**
+ * В веб-версии окно выбора файлов строится браузером, и он отклоняет фильтр
+ * с маской «*». Поэтому в списке нет пункта «Все файлы»: браузер добавляет
+ * такой пункт сам, а в настольной версии выручает попытка без фильтров.
+ */
 
 /** Заголовок рабочей области, то есть имя файла с расширением. */
 export function fileName(ws: Workspace): string {
@@ -44,17 +49,84 @@ export async function permanentUri(ws: Workspace): Promise<string | undefined> {
   return ws.origin;
 }
 
-/** Показать диалог выбора файлов. Пустой массив означает отмену. */
-export async function pickFiles(ctx: Context, message: string): Promise<Workspace[]> {
-  const picked = await ctx.openDialog({
-    multiSelections: true,
-    buttonLabel: 'Выбрать',
-    message,
-    filters: FILE_FILTERS
-  });
-  if (!picked) return [];
-  const list = Array.isArray(picked) ? picked : [picked];
-  return list.filter(ws => !!ws);
+/** Привести результат диалога к массиву рабочих областей. */
+function toList(value: unknown): Workspace[] {
+  if (!value) return [];
+  const list = Array.isArray(value) ? value : [value];
+  return list.filter(item => !!item) as Workspace[];
+}
+
+/** Один способ выбора файлов. */
+interface PickAttempt {
+  name: string;
+  run: () => Promise<unknown>;
+}
+
+/**
+ * Показать диалог выбора файлов.
+ *
+ * Способы перебираются по очереди. Следующий способ пробуется, если предыдущий
+ * бросил ошибку или завершился мгновенно и без результата, то есть окно не открылось.
+ * Если окно открылось и пользователь отменил выбор, возвращается пустой массив
+ * и перебор прекращается.
+ */
+export async function pickFiles(ctx: Context, message: string, output: OutputChannel): Promise<Workspace[]> {
+  const attempts: PickAttempt[] = [
+    {
+      name: 'диалог открытия',
+      run: () => ctx.openDialog({multiSelections: true, buttonLabel: 'Выбрать', message, filters: FILE_FILTERS})
+    },
+    {
+      name: 'обозреватель хранилищ',
+      run: () => ctx.openStorageFiles({
+        id: 'nashepo.projectfiles.picker',
+        title: message,
+        canPickMany: true,
+        allowLocal: true,
+        filters: FILE_FILTERS
+      })
+    },
+    {
+      name: 'диалог открытия без фильтров',
+      run: () => ctx.openDialog({multiSelections: true})
+    },
+    {
+      name: 'диалог открытия по одному файлу',
+      run: () => ctx.openDialog({buttonLabel: 'Выбрать'})
+    }
+  ];
+
+  const problems: string[] = [];
+
+  for (const attempt of attempts) {
+    const started = Date.now();
+    try {
+      const items = toList(await attempt.run());
+      const elapsed = Date.now() - started;
+      if (items.length) {
+        output.appendLine(`Выбор файлов: ${attempt.name}, выбрано ${items.length}`);
+        return items;
+      }
+      if (elapsed >= 400) {
+        output.appendLine(`Выбор файлов отменён пользователем (${attempt.name}).`);
+        return [];
+      }
+      output.appendLine(`Способ «${attempt.name}» не открыл окно (${elapsed} мс), пробую следующий.`);
+      problems.push(`${attempt.name}: окно не открылось`);
+    } catch (e) {
+      const text = (e as Error)?.message ?? String(e);
+      output.appendLine(`Способ «${attempt.name}» завершился ошибкой: ${text}`);
+      problems.push(`${attempt.name}: ${text}`);
+    }
+  }
+
+  output.appendLine('Ни один способ выбора файлов не сработал.');
+  output.show();
+  await ctx.showMessage(
+    ['Не удалось открыть окно выбора файлов.', ...problems],
+    'error'
+  );
+  return [];
 }
 
 /** Убрать повторы по имени файла и по адресу. */
