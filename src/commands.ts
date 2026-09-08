@@ -16,6 +16,12 @@ function channel(ctx: Context): OutputChannel {
   return ctx.createOutputChannel(CHANNEL);
 }
 
+/** Отмена пользователем, а не сбой. Программа сообщает о ней обычной ошибкой. */
+function isCancel(e: unknown): boolean {
+  const text = ((e as Error)?.message ?? String(e)).toLowerCase();
+  return text === 'canceled' || text === 'cancelled' || text.includes('отмен');
+}
+
 /** Выполнить команду, показав любую ошибку пользователю. */
 async function guard(ctx: Context, title: string, body: (output: OutputChannel) => Promise<void>): Promise<void> {
   const output = channel(ctx);
@@ -23,6 +29,10 @@ async function guard(ctx: Context, title: string, body: (output: OutputChannel) 
   try {
     await body(output);
   } catch (e) {
+    if (isCancel(e)) {
+      output.appendLine('Отменено пользователем.');
+      return;
+    }
     const text = (e as Error)?.message ?? String(e);
     output.appendLine(`Ошибка: ${text}`);
     const stack = (e as Error)?.stack;
@@ -67,35 +77,106 @@ export function create_project(ctx: Context): Promise<void> {
       if (choice.value === 'new') project = undefined;
     }
 
+    let rest = files;
+
     if (!project) {
-      output.appendLine('Создаю пустой проект. Укажите папку и имя проекта.');
-      const app = await createEmptyProject(ctx);
-      if (!app) {
-        output.appendLine('Создание проекта отменено.');
+      const kind = await ctx.showQuickPick(
+        [
+          {
+            label: 'Быстрый проект',
+            description: 'без сохранения на диск, ни одного лишнего вопроса',
+            detail: 'Первый файл становится основой проекта, остальные подключаются вложениями',
+            value: 'quick'
+          },
+          {
+            label: 'Проект в папке',
+            description: 'указать папку и имя, проект сохраняется',
+            detail: 'Все файлы, включая первый, становятся обычными вложениями',
+            value: 'folder'
+          }
+        ],
+        {title: 'Создание проекта', placeHolder: 'Какой проект создать'}
+      );
+      if (!kind) {
+        output.appendLine('Отменено пользователем.');
         return;
       }
-      project = await waitForProject(app);
-      if (!(await activateView(ctx, app))) {
-        output.appendLine('Вид проекта не готов, подключение файлов может не сработать.');
+
+      if (kind.value === 'quick') {
+        const first = files[0];
+        output.appendLine(`Быстрый проект на основе файла: ${fileName(first)}`);
+        const app = await ctx.manager.openWorkspace(first);
+        project = await waitForProject(app);
+        rest = files.slice(1);
+        if (!(await activateView(ctx, app))) {
+          output.appendLine('Вид проекта не готов, подключение файлов может не сработать.');
+        }
+        if (!project) {
+          output.appendLine('Не удалось получить модель проекта из первого файла.');
+          output.show();
+          await ctx.showMessage(`Файл «${fileName(first)}» не открылся как проект.`, 'error');
+          return;
+        }
+        output.appendLine('Первый файл лежит в теле проекта, а не в списке вложений. Это плата за скорость.');
+      } else {
+        output.appendLine('Создаю пустой проект. Укажите, где его разместить.');
+        const app = await createEmptyProject(ctx, output);
+        if (!app) {
+          output.appendLine('Создание проекта отменено.');
+          return;
+        }
+        project = await waitForProject(app);
+        if (!(await activateView(ctx, app))) {
+          output.appendLine('Вид проекта не готов, подключение файлов может не сработать.');
+        }
+        if (!project) {
+          output.appendLine('Не удалось получить модель нового проекта.');
+          output.show();
+          await ctx.showMessage('Новый проект создан, но его модель недоступна. Подключите файлы командой «Добавить файлы».', 'error');
+          return;
+        }
+        output.appendLine('Проект создан: ' + projectTitle(app));
       }
-      if (!project) {
-        output.appendLine('Не удалось получить модель нового проекта.');
-        output.show();
-        await ctx.showMessage('Новый проект создан, но его модель недоступна. Подключите файлы командой «Добавить файлы».', 'error');
-        return;
-      }
-      output.appendLine('Проект создан: ' + projectTitle(app));
     }
 
-    await report(ctx, output, await attachAll(ctx, project, files, output));
+    if (!rest.length) {
+      output.appendLine('Дополнительных файлов нет.');
+      await ctx.showMessage('Проект открыт. Дополнительных файлов для подключения не выбрано.', 'info');
+      return;
+    }
+
+    await report(ctx, output, await attachAll(ctx, project, rest, output));
   });
 }
 
 /**
- * Создать пустой проект штатной командой программы.
- * Она спрашивает папку и имя, создаёт каталог проекта и открывает его.
+ * Создать пустой проект.
+ *
+ * Сначала пробуем обычный диалог сохранения папки: он локальный и не требует
+ * подключённого хранилища. Проект в Топоматик 360 — это папка с расширением
+ * .wdx, поэтому имя должно на него заканчиваться. Если так не вышло, зовём
+ * штатную команду программы, которая спрашивает хранилище и имя.
  */
-async function createEmptyProject(ctx: Context): Promise<Application | undefined> {
+async function createEmptyProject(ctx: Context, output: OutputChannel): Promise<Application | undefined> {
+  try {
+    const workspace = await ctx.saveDialog({
+      folder: true,
+      suggestedName: 'Проект.wdx',
+      buttonLabel: 'Создать проект'
+    });
+    const title = workspace?.root?.title ?? '';
+    if (workspace && title.toLowerCase().endsWith('.wdx')) {
+      return await ctx.manager.openWorkspace(workspace);
+    }
+    if (workspace) {
+      output.appendLine(`Имя «${title}» не оканчивается на .wdx, поэтому папка проектом не станет.`);
+    }
+  } catch (e) {
+    if (isCancel(e)) return undefined;
+    output.appendLine('Диалог создания папки недоступен: ' + ((e as Error)?.message ?? String(e)));
+  }
+
+  output.appendLine('Перехожу к штатному созданию проекта.');
   const created = await ctx.manager.eval('ru.albatros.wdx/project:create');
   const app = created as Application | undefined;
   if (app && typeof app === 'object' && 'workspace' in app) return app;
