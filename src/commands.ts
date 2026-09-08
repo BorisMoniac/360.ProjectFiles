@@ -89,9 +89,9 @@ export function create_project(ctx: Context): Promise<void> {
             value: 'quick'
           },
           {
-            label: 'Проект в папке',
-            description: 'указать папку и имя, проект сохраняется',
-            detail: 'Все файлы, включая первый, становятся обычными вложениями',
+            label: 'Стандартный проект с хранилищем',
+            description: 'обычный путь программы: выбрать хранилище и задать имя',
+            detail: 'Проект сохраняется на диск, все файлы, включая первый, становятся обычными вложениями',
             value: 'folder'
           }
         ],
@@ -119,8 +119,8 @@ export function create_project(ctx: Context): Promise<void> {
         }
         output.appendLine('Первый файл лежит в теле проекта, а не в списке вложений. Это плата за скорость.');
       } else {
-        output.appendLine('Создаю пустой проект. Укажите, где его разместить.');
-        const app = await createEmptyProject(ctx, output);
+        output.appendLine('Создаю пустой проект штатным способом программы.');
+        const app = await createEmptyProject(ctx);
         if (!app) {
           output.appendLine('Создание проекта отменено.');
           return;
@@ -150,33 +150,14 @@ export function create_project(ctx: Context): Promise<void> {
 }
 
 /**
- * Создать пустой проект.
+ * Создать пустой проект штатной командой программы.
  *
- * Сначала пробуем обычный диалог сохранения папки: он локальный и не требует
- * подключённого хранилища. Проект в Топоматик 360 — это папка с расширением
- * .wdx, поэтому имя должно на него заканчиваться. Если так не вышло, зовём
- * штатную команду программы, которая спрашивает хранилище и имя.
+ * Она спрашивает хранилище и имя, создаёт каталог «имя.wdx» и открывает его.
+ * Свой диалог выбора папки здесь пробовать не нужно: программе всё равно нужна
+ * рабочая область в известном ей хранилище, и лишний вопрос только удваивал
+ * количество диалогов.
  */
-async function createEmptyProject(ctx: Context, output: OutputChannel): Promise<Application | undefined> {
-  try {
-    const workspace = await ctx.saveDialog({
-      folder: true,
-      suggestedName: 'Проект.wdx',
-      buttonLabel: 'Создать проект'
-    });
-    const title = workspace?.root?.title ?? '';
-    if (workspace && title.toLowerCase().endsWith('.wdx')) {
-      return await ctx.manager.openWorkspace(workspace);
-    }
-    if (workspace) {
-      output.appendLine(`Имя «${title}» не оканчивается на .wdx, поэтому папка проектом не станет.`);
-    }
-  } catch (e) {
-    if (isCancel(e)) return undefined;
-    output.appendLine('Диалог создания папки недоступен: ' + ((e as Error)?.message ?? String(e)));
-  }
-
-  output.appendLine('Перехожу к штатному созданию проекта.');
+async function createEmptyProject(ctx: Context): Promise<Application | undefined> {
   const created = await ctx.manager.eval('ru.albatros.wdx/project:create');
   const app = created as Application | undefined;
   if (app && typeof app === 'object' && 'workspace' in app) return app;
