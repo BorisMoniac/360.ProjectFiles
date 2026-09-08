@@ -34,8 +34,11 @@ async function guard(ctx: Context, title: string, body: (output: OutputChannel) 
 
 /**
  * Создать проект из нескольких файлов.
- * Первый файл открывается как проект, остальные подключаются к нему вложениями.
- * Если проект уже открыт, пользователь выбирает, куда добавлять файлы.
+ *
+ * Создаётся пустой проект, и в него вложениями подключаются все выбранные файлы,
+ * включая первый. Раньше первый файл открывался как сам проект, и он оказывался
+ * не в равном положении с остальными: у него другое имя, он не значится
+ * вложением, и проверки, которые обходят вложения, его пропускали.
  */
 export function create_project(ctx: Context): Promise<void> {
   const output = channel(ctx);
@@ -48,12 +51,11 @@ export function create_project(ctx: Context): Promise<void> {
 
     const opened = ctx.manager.activeApp;
     let project = projectOf(opened);
-    let rest = files;
 
     if (project) {
       const choice = await ctx.showQuickPick(
         [
-          {label: 'Новый проект', description: `на основе файла «${fileName(files[0])}»`, value: 'new'},
+          {label: 'Новый проект', description: 'создать пустой проект и вложить в него все файлы', value: 'new'},
           {label: 'Текущий проект', description: projectTitle(opened), value: 'current'}
         ],
         {title: 'Создание проекта', placeHolder: 'Куда добавить выбранные файлы'}
@@ -66,33 +68,38 @@ export function create_project(ctx: Context): Promise<void> {
     }
 
     if (!project) {
-      const first = files[0];
-      output.appendLine(`Открываю проект: ${fileName(first)}`);
-      const app = await ctx.manager.openWorkspace(first);
+      output.appendLine('Создаю пустой проект. Укажите папку и имя проекта.');
+      const app = await createEmptyProject(ctx);
+      if (!app) {
+        output.appendLine('Создание проекта отменено.');
+        return;
+      }
       project = await waitForProject(app);
       if (!(await activateView(ctx, app))) {
         output.appendLine('Вид проекта не готов, подключение файлов может не сработать.');
       }
       if (!project) {
-        output.appendLine('Не удалось получить модель проекта. Формат первого файла не поддерживается как проект.');
+        output.appendLine('Не удалось получить модель нового проекта.');
         output.show();
-        await ctx.showMessage(
-          `Файл «${fileName(first)}» не открылся как проект. Выберите первым файл проекта или откройте проект вручную.`,
-          'error'
-        );
+        await ctx.showMessage('Новый проект создан, но его модель недоступна. Подключите файлы командой «Добавить файлы».', 'error');
         return;
       }
-      rest = files.slice(1);
+      output.appendLine('Проект создан: ' + projectTitle(app));
     }
 
-    if (!rest.length) {
-      output.appendLine('Дополнительных файлов нет.');
-      await ctx.showMessage('Проект открыт. Дополнительных файлов для подключения не выбрано.', 'info');
-      return;
-    }
-
-    await report(ctx, output, await attachAll(ctx, project, rest, output));
+    await report(ctx, output, await attachAll(ctx, project, files, output));
   });
+}
+
+/**
+ * Создать пустой проект штатной командой программы.
+ * Она спрашивает папку и имя, создаёт каталог проекта и открывает его.
+ */
+async function createEmptyProject(ctx: Context): Promise<Application | undefined> {
+  const created = await ctx.manager.eval('ru.albatros.wdx/project:create');
+  const app = created as Application | undefined;
+  if (app && typeof app === 'object' && 'workspace' in app) return app;
+  return ctx.manager.activeApp;
 }
 
 /** Добавить файлы в уже открытый проект. */
